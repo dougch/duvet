@@ -79,9 +79,78 @@ accounts for most of the gap.
   it in properly; do not leave it half-configured.
 - **RFC 5280 (X.509)** — only after an actor-filter pass. Sole source of volume.
 
+## Second Survey — RFCs Referenced Outside `crypto/fipsmodule/`
+
+Measurement run: 2026-09-09. The first survey drew its candidate list from a
+grep of `crypto/fipsmodule/`, which silently limited it to the configured source
+scope. Re-grepping all of `crypto/` and `include/` found **79 RFCs referenced
+only outside `crypto/fipsmodule/`**. Most are TLS-surface (out of scope) or
+PKI/ASN.1 (deferred), but two are algorithm RFCs that beat everything in the
+first survey:
+
+| RFC | Algorithm | MUST | body | apdx % | Impl locality | Gate |
+|---|---|---|---|---|---|---|
+| 9180 | HPKE | **37** | 37 | 0% | `crypto/hpke/hpke.c` (792 L, 1 file) | Gates 1–4 PASS, **Gate 5 blocked** |
+| 8439 | ChaCha20-Poly1305 | 8 | 8 | 0% | `crypto/cipher_extra/e_chacha20poly1305.c` (730 L) + `crypto/chacha/chacha.c` (239 L) | Gates 1–4 PASS, **Gate 5 blocked** |
+| 7914 | scrypt | 0 | 0 | — | `crypto/evp_extra/` | REJECT — Gate 1 |
+| 3962 | Kerberos AES | 2 | 2 | 0% | `crypto/cipher_extra/` | Low value, Kerberos-specific |
+| 8009 | Kerberos AES-SHA2 | 0 | 0 | — | `crypto/cipher_extra/` | REJECT — Gate 1 |
+| 3526 | MODP DH groups | 0 | 0 | — | `crypto/dh_extra/` | REJECT — Gate 1 |
+
+**RFC 9180 alone has twice the body-MUST count of the entire first survey's
+non-PKI total.** It is a single 792-line file with 0% appendix ratio — the best
+locality/density combination measured. Its Gate 5 blocker is different in kind
+from the ASN.1 cases: HPKE is not a FIPS-approved algorithm, so including it
+contradicts the config's stated purpose rather than merely extending it.
+
+### Actor breakdown of RFC 9180's 37 MUSTs (sampled, not fully classified)
+
+- **§5.x (11)** — HPKE API: role separation (sender context MUST NOT decrypt),
+  psk/psk_id pairing, sequence-number overflow. Most annotatable.
+- **§7.x (11)** — KEM validation: all-zero X25519 DH output must abort, partial
+  public-key validation for P-256/384/521, point-at-infinity rejection.
+  Mostly annotatable and high-consequence.
+- **§9.x (12)** — Security Considerations, mostly **not** annotatable: caller
+  obligations ("Applications … MUST enforce the ordering property", "ikm MUST
+  NOT be reused elsewhere").
+- **§4.x (3)** — labeled KDF construction; partly annotatable.
+
+**New actor category found: specification author.** Several MUSTs address future
+RFC authors, not implementers — "Future specifications that define new KDFs MUST
+specify bounds for these variable-length parameters" (§7.2.1), "Future KEM
+instantiations MUST ensure …" (§9.6). Gate 3 previously only distinguished
+issuer vs. validator; this is a third actor that no implementation can satisfy.
+
+Rough annotatable estimate: **12–18 of 37**. Not verified — needs a real pass.
+
+### Method note
+
+The first survey's candidate list was scoped by a grep of the already-configured
+source tree, so it could only rediscover RFCs already in scope. Any future
+survey must grep the **whole repo**, then apply Gate 5, rather than grepping
+inside the configured scope and inheriting its blind spot.
+
 ## Ceiling
 
-Total annotatable body MUSTs across all non-PKI algorithm RFCs in aws-lc: **~18**. This approach does not scale by volume in crypto. The value is per-requirement consequence, not coverage percentage. RFC 5280 is the only path to large numbers, and roughly 16% of its body MUSTs are issuer-side (floor estimate from a keyword pass; 188 of 261 were unclassified, so the real out-of-scope share is higher).
+**Revised 2026-09-09 after the second survey.** The original figure was ~18
+annotatable body MUSTs across all non-PKI algorithm RFCs, which was wrong
+because the candidate list came from a grep confined to the configured source
+scope. Adding RFCs 9180 and 8439 raises the non-PKI body-MUST total from ~18 to
+**~63** (18 + 37 + 8), of which perhaps 30–40 are plausibly annotatable.
+
+Both additions are Gate-5 blocked today. So the accurate framing is:
+
+- **Inside the current FIPS-approved-algorithm scope: ~18, and it is now spent.**
+  14 annotated, 7 skipped, queue empty.
+- **Reachable by widening scope to non-FIPS algorithm code: ~+45**, dominated by
+  HPKE. Requires an explicit decision that the config tracks more than the
+  FIPS-approved surface.
+- **RFC 5280 (X.509)** remains the only path to three-digit numbers, and roughly
+  16% of its body MUSTs are issuer-side (floor estimate from a keyword pass;
+  188 of 261 were unclassified, so the real out-of-scope share is higher).
+
+The "does not scale by volume in crypto" conclusion was overstated. It holds for
+the FIPS module surface specifically, not for aws-lc's algorithm code overall.
 
 ## Notes on RFC 8017
 
