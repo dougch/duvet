@@ -76,9 +76,35 @@ See [rfc-candidates.md](rfc-candidates.md) for measured MUST counts, gate criter
 2. **Appendix ratio < 25%** — high appendix share means ASN.1 encoding rules, not code behavior.
 3. **Actor filter** — drop issuer/CA/sender-side MUSTs; aws-lc validates and computes, it does not issue.
 4. **Code locality** — prefer a bounded file set (tiebreak).
-5. **Satisfying code is inside `config.toml`'s source patterns** — the config covers `crypto/fipsmodule/**`, `crypto/evp/**`, `include/openssl/evp.h`. ASN.1/OID requirements live in `crypto/obj` and `crypto/asn1` and cannot be cited without widening scope. `grep` for the OID or structure name before queueing.
+5. **Satisfying code is inside `config.toml`'s source patterns** — as of
+   `53f0f0955` the config covers all of `crypto/**` plus `include/openssl/*.h`,
+   so this gate now only rejects code outside `crypto/` (notably `crypto/obj`
+   and `crypto/asn1` are *in* scope, but `ssl/` is not). `grep` for the OID or
+   structure name before queueing.
 
-**Queue is empty** as of 2026-09-09. Remaining candidates (8452, 5280) each need a scope decision first — see rfc-candidates.md.
+**Queue is empty** as of 2026-09-09. RFC 5280 (X.509) is the only remaining
+candidate with volume and needs an actor-filter pass first — see
+rfc-candidates.md.
+
+### The two config axes are independent
+
+`[[source]]` patterns control **where duvet looks for citations**.
+`[[requirement]]` blocks alone determine the report's **requirement
+denominator**. Widening sources cannot pull in new requirements — verified by
+taking sources scanned from 294 to 586 and getting byte-identical CITED/UNCITED
+counts. Adding an RFC to the report always means adding a `[[specification]]` +
+`[[requirement]]` pair, never a source pattern.
+
+### Two traps when adding an RFC
+
+- **Config location matters.** Duvet resolves `[[requirement]]` and
+  specification paths relative to the *config file's directory*. A config copied
+  to `/tmp` fails with confusing `missing section` errors even with unchanged
+  contents. Test configs must live in `.duvet/`.
+- **`duvet extract` mirrors the source path beneath `-o`.** Output lands at
+  `.duvet/requirements/.../rfcNNNN/.duvet/specifications/.../rfcNNNN/*.toml`.
+  Flatten it with a recursive glob, not a hardcoded path, or you silently get
+  zero requirements.
 
 ## Adding a New RFC
 
@@ -104,15 +130,33 @@ instead — compare CITED counts against the state file's `annotated` counts.
 
 ## Skip Categories
 
-Record one of these in `skip_reason`:
+Seven, discovered in this order. Record one in `skip_reason`, and always say
+*why* in enough detail that a reviewer can disagree with the call.
 
-- **Appendix / theoretical** — a property of the algorithm's definition, not of
-  any code path (RFC 7748 appendix-A curve properties).
-- **Caller obligation** — the API cannot enforce it across calls (RFC 3610
-  nonce uniqueness).
-- **Out of source scope** — real code behavior, but the satisfying code sits
-  outside `config.toml`'s source patterns (RFC 5649 / 3874 ASN.1 and OIDs).
-  See Gate 5 in [rfc-candidates.md](rfc-candidates.md).
+1. **Appendix / theoretical** — a property of the algorithm's definition, not of
+   any code path (RFC 7748 appendix-A curve properties).
+2. **Caller obligation** — the API cannot enforce it across calls (RFC 3610 and
+   RFC 8439 nonce uniqueness).
+3. **Out of source scope** — real code behavior, but the satisfying code sits
+   outside `config.toml`'s source patterns. Mostly retired now that sources
+   cover `crypto/**`; still applies to `ssl/`.
+4. **Specification author** — addressed to future RFC authors, not to
+   implementers ("Future specifications that define new KDFs MUST specify
+   bounds", RFC 9180 §7.2.1). No implementation can satisfy it. This is a third
+   actor beyond Gate 3's issuer/validator split.
+5. **Not implemented** — the feature does not exist in aws-lc, so there is no
+   code to cite (RFC 9180 PSK modes, NIST-curve KEMs). State the verified fact
+   that establishes it, not an assumption.
+6. **Design-level security property** — a property of the construction rather
+   than of any code path.
+7. **API permits the prohibited behavior** — the requirement forbids something
+   and the API allows a caller to do it (RFC 8439 tag truncation via
+   caller-selectable `tag_len`). Do **not** assert this as a defect; record the
+   evidence and flag it for maintainer review. Often the requirement's actor is
+   a protocol rather than the primitive, which is a legitimate defense.
+
+Categories 4-7 all came from RFCs outside the FIPS module, which is why the
+annotatable ratio fell from 67% to 41% once those were in scope.
 
 ## Run Log
 

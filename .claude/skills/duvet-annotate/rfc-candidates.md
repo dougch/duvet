@@ -20,17 +20,22 @@ Bounded file set beats sprawl. One file is ideal; a whole subdirectory means mor
 
 **Gate 5 — Satisfying code is inside the configured source patterns.**
 Added 2026-09-09 after RFC 5649 and RFC 3874 passed Gates 1–4 and then produced
-zero annotations. `config.toml` scopes sources to `crypto/fipsmodule/**`,
-`crypto/evp/**`, and `include/openssl/evp.h` — the FIPS-approved-algorithm
-surface. ASN.1 `AlgorithmIdentifier` and OID requirements are satisfied in
-`crypto/obj` and `crypto/asn1`, so they are real implementation requirements
-that this config cannot cite. Check with one `grep` for the OID or structure
-name before queueing.
+zero annotations, because the config then scoped sources to the
+FIPS-approved-algorithm surface while the satisfying ASN.1/OID code lives in
+`crypto/obj` and `crypto/asn1`.
 
-This is a distinct skip category from "appendix / theoretical": the requirement
-is about code behavior, the code exists, it is just outside the configured
-scope. Widening `config.toml` would make them annotatable at the cost of
-enlarging the report denominator.
+**Largely retired as of `53f0f0955`.** Sources now cover all of `crypto/**` plus
+`include/openssl/*.h`, so the gate only rejects code outside `crypto/` — chiefly
+`ssl/`. Still worth one `grep` before queueing.
+
+**Correction to the original wording.** This section previously said widening
+`config.toml` would make such requirements annotatable "at the cost of enlarging
+the report denominator." The cost claim was wrong. Source patterns and the
+requirement denominator are independent axes: widening sources from
+`crypto/fipsmodule/**` to `crypto/**` took sources scanned from 294 to 586 and
+left CITED/UNCITED byte-identical at 16/26. The denominator grows only when a
+`[[specification]]` + `[[requirement]]` pair is added. Widening sources is
+therefore close to free.
 
 ## Measured Candidates
 
@@ -69,14 +74,26 @@ Superseding pairs deduped before measurement: 3394/5649 (key wrap), 2898/6070 (P
 Actual annotated total: **14**, against a predicted ceiling of ~18. Gate 5
 accounts for most of the gap.
 
+### Second-survey RFCs, resolved 2026-09-09
+
+| RFC | Result | Commit |
+|---|---|---|
+| 9180 | 10 annotated / 27 skip | `53f0f0955` |
+| 8439 | 3 annotated / 5 skip | `da0727fd5` |
+
+Both required dropping the FIPS-approved-algorithm scoping from
+`config.toml`, done in `53f0f0955`.
+
 ### Remaining options, none queued
 
-- **RFC 8452 (AES-GCM-SIV)** — 2 clean body MUSTs, but the implementation is
-  `crypto/cipher_extra/e_aesgcmsiv.c`, outside the configured source patterns.
-  Same Gate 5 problem as 5649/3874, resolvable only by widening scope. Its spec
-  text is currently sitting in `.duvet/specifications/` untracked and is being
-  auto-discovered by `duvet report` (4 uncited requirements) — remove it or wire
-  it in properly; do not leave it half-configured.
+- **RFC 8452 (AES-GCM-SIV)** — 2 clean body MUSTs in
+  `crypto/cipher_extra/e_aesgcmsiv.c`, now inside the source patterns, so Gate 5
+  no longer blocks it. Its half-configured spec text (untracked in
+  `.duvet/specifications/`, auto-discovered by `duvet report` as 4 phantom
+  uncited requirements) was **deleted** 2026-09-09 rather than wired in. Re-add
+  properly with a `[[specification]]` + `[[requirement]]` pair if wanted.
+- **RFC 3962 (Kerberos AES)** — 2 body MUSTs, 0% appendix, in
+  `crypto/cipher_extra/`. Now reachable. Low value and Kerberos-specific.
 - **RFC 5280 (X.509)** — only after an actor-filter pass. Sole source of volume.
 
 ## Second Survey — RFCs Referenced Outside `crypto/fipsmodule/`
@@ -90,8 +107,8 @@ first survey:
 
 | RFC | Algorithm | MUST | body | apdx % | Impl locality | Gate |
 |---|---|---|---|---|---|---|
-| 9180 | HPKE | **37** | 37 | 0% | `crypto/hpke/hpke.c` (792 L, 1 file) | Gates 1–4 PASS, **Gate 5 blocked** |
-| 8439 | ChaCha20-Poly1305 | 8 | 8 | 0% | `crypto/cipher_extra/e_chacha20poly1305.c` (730 L) + `crypto/chacha/chacha.c` (239 L) | Gates 1–4 PASS, **Gate 5 blocked** |
+| 9180 | HPKE | **37** | 37 | 0% | `crypto/hpke/hpke.c` (792 L, 1 file) | **DONE** — 10/27, `53f0f0955` |
+| 8439 | ChaCha20-Poly1305 | 8 | 8 | 0% | `crypto/cipher_extra/e_chacha20poly1305.c` (730 L) + `crypto/poly1305/poly1305.c` (299 L) | **DONE** — 3/5, `da0727fd5` |
 | 7914 | scrypt | 0 | 0 | — | `crypto/evp_extra/` | REJECT — Gate 1 |
 | 3962 | Kerberos AES | 2 | 2 | 0% | `crypto/cipher_extra/` | Low value, Kerberos-specific |
 | 8009 | Kerberos AES-SHA2 | 0 | 0 | — | `crypto/cipher_extra/` | REJECT — Gate 1 |
@@ -121,7 +138,13 @@ specify bounds for these variable-length parameters" (§7.2.1), "Future KEM
 instantiations MUST ensure …" (§9.6). Gate 3 previously only distinguished
 issuer vs. validator; this is a third actor that no implementation can satisfy.
 
-Rough annotatable estimate: **12–18 of 37**. Not verified — needs a real pass.
+Rough annotatable estimate was **12–18 of 37**. The real pass produced **10**
+(`53f0f0955`), so the estimate was 20–80% high. The §7.x block was the
+overestimate: its NIST-curve public-key-validation MUSTs are unannotatable
+because aws-lc implements only `EVP_HPKE_DHKEM_X25519_HKDF_SHA256` — a fact
+about the implementation that no amount of reading the RFC would reveal.
+**Sampling section headers predicts requirement counts; it does not predict
+annotatability.**
 
 ### Method note
 
@@ -138,19 +161,26 @@ because the candidate list came from a grep confined to the configured source
 scope. Adding RFCs 9180 and 8439 raises the non-PKI body-MUST total from ~18 to
 **~63** (18 + 37 + 8), of which perhaps 30–40 are plausibly annotatable.
 
-Both additions are Gate-5 blocked today. So the accurate framing is:
+**Both additions are now done** (`53f0f0955`, `da0727fd5`), so the ceiling is no
+longer a prediction — it is measured:
 
-- **Inside the current FIPS-approved-algorithm scope: ~18, and it is now spent.**
-  14 annotated, 7 skipped, queue empty.
-- **Reachable by widening scope to non-FIPS algorithm code: ~+45**, dominated by
-  HPKE. Requires an explicit decision that the config tracks more than the
-  FIPS-approved surface.
+- **Inside the old FIPS-approved-algorithm scope: ~18, spent.** 14 annotated,
+  7 skipped.
+- **Non-FIPS algorithm code added 45 body MUSTs and yielded 13 annotations**
+  (10 HPKE + 3 ChaCha20-Poly1305), not the 30–40 estimated. The scope decision
+  roughly doubled the annotation count (14 → 27) and tripled the requirement
+  count (21 → 66).
 - **RFC 5280 (X.509)** remains the only path to three-digit numbers, and roughly
   16% of its body MUSTs are issuer-side (floor estimate from a keyword pass;
   188 of 261 were unclassified, so the real out-of-scope share is higher).
 
-The "does not scale by volume in crypto" conclusion was overstated. It holds for
-the FIPS module surface specifically, not for aws-lc's algorithm code overall.
+The "does not scale by volume in crypto" conclusion was overstated — it holds
+for the FIPS module surface, not for aws-lc's algorithm code overall. But the
+corrected version is more nuanced than "widen scope and get 3× the coverage":
+**the requirement count scaled 3×; the annotation count scaled 2×; the
+annotatable ratio fell from 67% to 41%.** Larger, more modern RFCs carry
+proportionally more caller-obligation and specification-author requirements,
+which are exactly the ones no implementation can cite.
 
 ## Notes on RFC 8017
 

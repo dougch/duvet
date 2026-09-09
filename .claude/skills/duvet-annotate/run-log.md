@@ -111,3 +111,139 @@ name — and it would have kept 5649 and 3874 out of the queue.
 | **Total** | **14** | **7** | **21** |
 
 Overall annotatable ratio: **67%** (14 of 21). Queue empty.
+
+---
+
+## Second Survey — RFCs outside `crypto/fipsmodule/`
+
+- **Date**: 2026-09-09
+- **Trigger**: the first survey's candidate list came from a grep of
+  `crypto/fipsmodule/`, so it could only rediscover RFCs already in the
+  configured source scope.
+- **Output**: [rfc-candidates.md](rfc-candidates.md), "Second Survey" section
+- **Commits**: `0e474b871` (removed dead `crypto/evp/**` source patterns, which
+  matched zero files)
+
+### Outcomes
+
+- **79 RFCs** referenced only outside `crypto/fipsmodule/`. Two are algorithm
+  RFCs that beat everything in the first survey: 9180 (HPKE, 37 body MUSTs) and
+  8439 (ChaCha20-Poly1305, 8 body MUSTs).
+- Ceiling revised **~18 → ~63** non-PKI body MUSTs. The earlier "does not scale
+  by volume in crypto" conclusion was overstated — it holds for the FIPS module
+  surface, not for aws-lc's algorithm code overall.
+- **Verified that the two config axes are independent.** Widening `[[source]]`
+  from `crypto/fipsmodule/**` to `crypto/**` took sources scanned from 294 to
+  586 and left CITED/UNCITED **byte-identical** at 16/26. The report's
+  requirement denominator comes only from `[[requirement]]` blocks; source
+  patterns control where duvet looks for citations, nothing more.
+
+Two measurement errors worth recording, both caught and corrected:
+
+1. A first attempt concluded "widening sources breaks the report" from 4
+   `missing section` errors. Cause was the **test config's location**, not its
+   contents — duvet resolves `[[requirement]]` and specification paths relative
+   to the config file's directory, so a config copied to `/tmp` fails even
+   unchanged. A control run with an unchanged config in `/tmp` reproduced the
+   same failure, which falsified the conclusion.
+2. The candidate measurement pass returned zero MUSTs for all 6 RFCs.
+   `duvet extract` mirrors the **source** path beneath `-o`, so output landed at
+   `reqs/rfcN/specs/rfcN/*.toml` while the flattener searched for a path
+   containing `specifications`. Any flattener that hardcodes one output path
+   silently yields zero results.
+
+---
+
+## Run 4 — RFC 9180 (HPKE)
+
+- **Date**: 2026-09-09
+- **Commit**: `53f0f0955` — `feat(duvet): drop FIPS-only source scoping; annotate RFC 9180 (HPKE)`
+- **Target file**: `crypto/hpke/hpke.c` (single 792-line file)
+- **Scope decision**: dropped FIPS-approved-algorithm scoping from
+  `config.toml`. HPKE is not FIPS-approved; including it makes the config track
+  normative RFC requirements wherever they are implemented in `crypto/`.
+
+### Outcomes
+
+- 10 annotated across §4, §4.1, §5.1, §5.2, §7.1.4 via 6 edits
+- 27 skipped — the largest skip set so far, and the reason the skip taxonomy
+  grew from 3 categories to 6
+- **Annotatable ratio: 27%** (10 of 37) — lowest measured, because §9
+  (Security Considerations) is 12 MUSTs of caller obligations and design-level
+  properties
+- Report total CITED 16 → 26. HPKE is now the largest cited spec on the report.
+- `gcc -fsyntax-only -Iinclude -Icrypto -I.` passes. The editor's clang
+  diagnostics for this file are false positives — it lints without include
+  paths, so one missing top-level header cascades into dozens of
+  `Unknown type name` errors.
+
+### New skip categories from this run
+
+- **Specification author** — 7 MUSTs address future RFC authors ("Future
+  specifications that define new KDFs MUST specify bounds"). No implementation
+  can satisfy them. Gate 3 previously distinguished only issuer vs. validator.
+- **Not implemented** — 5 PSK-mode MUSTs and 4 NIST-curve KEM MUSTs. Verified
+  facts about aws-lc, not properties of the RFC: the only KEM is
+  `EVP_HPKE_DHKEM_X25519_HKDF_SHA256` (zero P-256 references), the only modes
+  are `HPKE_MODE_BASE` and `HPKE_MODE_AUTH`, and `psk`/`psk_id` are always
+  passed `NULL, 0`.
+- **Design-level security property** — 3 MUSTs stating properties of the
+  construction rather than of any code path.
+
+One skip flagged for maintainer review: aws-lc clamps the X25519 scalar inside
+the scalar multiplication rather than at serialize/deserialize, and
+`X25519_keypair` deliberately inverts the masking to detect non-conforming
+peers. Not cited because the literal serialize/deserialize clamping the RFC
+requires is not where aws-lc performs it.
+
+---
+
+## Run 5 — RFC 8439 (ChaCha20-Poly1305)
+
+- **Date**: 2026-09-09
+- **Commit**: `da0727fd5` — `feat(duvet): wire RFC 8439 (ChaCha20-Poly1305) into coverage`
+- **Target files**: `crypto/cipher_extra/e_chacha20poly1305.c`,
+  `crypto/poly1305/poly1305.c`
+
+### Outcomes
+
+- 3 annotated of 8 body MUSTs (**37%**):
+  - §2.5 `r` clamping — `CRYPTO_poly1305_init`. The radix-2^26 masks
+    (`0x3ffff03`, `0x3ffc0ff`, `0x3f03fff`, `0x00fffff`) fold the RFC's clamp
+    into the limb split rather than doing it as a separate step.
+  - §4 Poly1305 key unpredictability — `calc_tag`, where the one-time key is
+    ChaCha20 keystream block 0.
+  - §4 constant-time comparison — `CRYPTO_memcmp` in
+    `chacha20_poly1305_open_gather`.
+- 5 skipped: 2 caller obligations, 1 specification-author, 2 tag-truncation
+- Report total CITED 26 → 29
+- `gcc -fsyntax-only` passes on both edited files
+
+### Seventh skip category: API permits the prohibited behavior
+
+RFC 8439 §4 says "any protocol using this algorithm MUST include the complete
+tag" and "Tag truncation MUST NOT be done." aws-lc's
+`aead_chacha20_poly1305_init` accepts any `tag_len` in 1..`POLY1305_TAG_LEN`,
+and the `EVP_CIPHER` path accepts `EVP_CTRL_AEAD_SET_TAG` with any `arg` in the
+same range — so a caller can request a truncated tag.
+
+This is structurally different from the six earlier categories. The code does
+not fail to implement something; it permits something the RFC forbids. The
+actor is arguably the protocol rather than the primitive, which is why this is
+recorded as a skip with a maintainer-review note rather than an asserted
+defect. Second instance of this shape after the `AES_unwrap_key` observation
+from Run 3.
+
+### Cumulative after Run 5
+
+| | Annotated | Skipped | Total |
+|---|---|---|---|
+| First four runs (7748 / 3610 / 3394 / 5649 / 3874 / 8032) | 14 | 7 | 21 |
+| RFC 9180 | 10 | 27 | 37 |
+| RFC 8439 | 3 | 5 | 8 |
+| **Total** | **27** | **39** | **66** |
+
+Overall annotatable ratio: **41%** (27 of 66), down from 67% before the two
+non-FIPS RFCs. The drop is the finding, not a regression: the newly reachable
+RFCs are larger and carry proportionally more caller-obligation and
+specification-author requirements.
