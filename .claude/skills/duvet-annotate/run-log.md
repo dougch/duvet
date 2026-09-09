@@ -228,11 +228,51 @@ and the `EVP_CIPHER` path accepts `EVP_CTRL_AEAD_SET_TAG` with any `arg` in the
 same range — so a caller can request a truncated tag.
 
 This is structurally different from the six earlier categories. The code does
-not fail to implement something; it permits something the RFC forbids. The
-actor is arguably the protocol rather than the primitive, which is why this is
-recorded as a skip with a maintainer-review note rather than an asserted
-defect. Second instance of this shape after the `AES_unwrap_key` observation
-from Run 3.
+not fail to implement something; it permits something the RFC forbids. Second
+instance of this shape after the `AES_unwrap_key` observation from Run 3.
+
+### Follow-up: annotated `type=TODO`, and the provenance check that resolved it
+
+Two corrections came out of reviewing this finding.
+
+**1. A state-file `skip` is invisible in the report.** Those two MUSTs rendered
+as plain `incomplete` — indistinguishable from requirements nobody examined. The
+`skip_reason` was only ever in `annotation-loop-progress.json`, which duvet does
+not read. Both are now annotated `//= type=TODO`, which keeps them uncited but
+labels them as known gaps (`incomplete` + `todo` in the report JSON).
+
+`type=exception` was the alternative and was rejected: it carries a `reason=`
+string into the HTML report, but `report/ci.rs` marks exceptions as fully
+covered, so it would have moved the requirement *out* of the uncited pool. That
+declares the deviation accepted, which is a maintainer's call.
+
+`check_duvet.py` was collapsing both `exception` and `todo` into UNCITED, hiding
+exactly the requirements a reviewer needs. Now reports four columns:
+CITED / TODO / EXCPT / UNCITED.
+
+**2. Checking fork provenance answered the question without a co-worker.** The
+plan was to ask a teammate whether caller-selected `tag_len` is an accepted
+deviation. Four commands made that unnecessary:
+
+- `git log -S"tag_len > POLY1305_TAG_LEN"` → introduced by `de0b20268`,
+  "ChaCha20-Poly1305 support.", Adam Langley, **2014-06-20**
+- that date **predates RFC 8439** (2018) and RFC 7539 (2015) — the code predates
+  the requirement it appears to violate
+- current upstream BoringSSL (`crypto/cipher/e_chacha20poly1305.cc`, master) has
+  the **identical** upper-bound-only check, 11 years later
+- `include/openssl/aead.h` documents it as intended for *every* AEAD:
+  "Authentication tags may be truncated by passing a size as |tag_len|"
+
+So this is not an aws-lc divergence and not an oversight — it is a documented
+property of the `EVP_AEAD` abstraction, inherited unchanged. The RFC's own
+wording ("any protocol *using* this algorithm") addresses protocols, and aws-lc
+ships the primitive.
+
+**Generalized into a rule** (see SKILL.md): before escalating an "API permits
+what the spec forbids" finding to a human, establish provenance. Documented
+intent plus unchanged upstream history is a stronger answer than a maintainer's
+recollection, and cheaper for everyone. In a fork, the upstream history is
+already in the repo.
 
 ### Cumulative after Run 5
 

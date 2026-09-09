@@ -152,11 +152,59 @@ Seven, discovered in this order. Record one in `skip_reason`, and always say
 7. **API permits the prohibited behavior** — the requirement forbids something
    and the API allows a caller to do it (RFC 8439 tag truncation via
    caller-selectable `tag_len`). Do **not** assert this as a defect; record the
-   evidence and flag it for maintainer review. Often the requirement's actor is
-   a protocol rather than the primitive, which is a legitimate defense.
+   evidence and flag it. Often the requirement's actor is a protocol rather than
+   the primitive, which is a legitimate defense.
+
+   **Annotate this category as `type=TODO`, not as a skip.** A skip is invisible
+   in the duvet report — the reason lives only in the state file, so the
+   requirement looks identical to one nobody examined. See "Recording a
+   non-citation in the report" below.
 
 Categories 4-7 all came from RFCs outside the FIPS module, which is why the
 annotatable ratio fell from 67% to 41% once those were in scope.
+
+## Recording a non-citation in the report
+
+A `skip` in the state file does not reach the report at all. Duvet has two
+annotation types for this, and they behave differently — verified empirically
+against the JSON report:
+
+| Annotation | Status keys | Reason text in report? | Counts as uncited? |
+|---|---|---|---|
+| none (state-file skip) | `incomplete` | no | yes |
+| `//= type=TODO` | `incomplete` + `todo` | **no** — parser rejects `reason` on TODO | yes |
+| `//= type=exception` + `//= reason=` | `exception` | **yes, verbatim in HTML** | **no** |
+
+- `reason=` is accepted only on `exception`, `implication`, `citation`, `test`
+  (`duvet/src/comment/parser.rs`). TODO takes `tracking-issue=` and `feature=`.
+- `report/ci.rs` marks exceptions as **fully covered**, so `--require-citations`
+  passes on them.
+
+**Default to `type=TODO`.** `exception` declares the deviation accepted and
+removes the requirement from the uncited pool — that is a maintainer's decision,
+not the loop's. Put the explanation in a plain `//` comment directly above the
+annotation block: duvet ignores it, but it is what a reviewer reads in the diff.
+
+## Before escalating a finding to a human: check fork provenance
+
+aws-lc is a BoringSSL fork and the full upstream history is in the repo. Before
+asking a maintainer to weigh in on "the API permits what the spec forbids,"
+spend two commands establishing whether the behavior is an aws-lc divergence or
+inherited-and-intentional:
+
+```bash
+git log --oneline -S"<the exact check>" -- <file>   # when did it appear?
+git show --format="%an %ad" <sha> | head -3          # who, and does it predate the RFC?
+grep -n -B12 "EVP_..._init(" include/openssl/<hdr>.h # is it documented as intended?
+curl -sf https://raw.githubusercontent.com/google/boringssl/master/<path> # still there upstream?
+```
+
+For RFC 8439 tag truncation this took the question off a co-worker's plate
+entirely: the check is unchanged from Adam Langley's 2014 commit `de0b20268`
+(which predates RFC 8439), current upstream BoringSSL has it verbatim, and
+`include/openssl/aead.h` documents truncation as intended for every AEAD.
+**Documented intent plus unchanged upstream provenance is a much stronger answer
+than a maintainer's recollection**, and it takes less of everyone's time.
 
 ## Run Log
 
