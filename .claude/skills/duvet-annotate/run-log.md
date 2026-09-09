@@ -215,7 +215,8 @@ requires is not where aws-lc performs it.
     ChaCha20 keystream block 0.
   - §4 constant-time comparison — `CRYPTO_memcmp` in
     `chacha20_poly1305_open_gather`.
-- 5 skipped: 2 caller obligations, 1 specification-author, 2 tag-truncation
+- 5 not cited: 2 caller obligations + 1 specification-author (state-file skips),
+  and 2 tag-truncation MUSTs annotated `type=exception` (see follow-up below)
 - Report total CITED 26 → 29
 - `gcc -fsyntax-only` passes on both edited files
 
@@ -231,24 +232,43 @@ This is structurally different from the six earlier categories. The code does
 not fail to implement something; it permits something the RFC forbids. Second
 instance of this shape after the `AES_unwrap_key` observation from Run 3.
 
-### Follow-up: annotated `type=TODO`, and the provenance check that resolved it
+### Follow-up: `type=exception`, and the provenance check that decided it
 
 Two corrections came out of reviewing this finding.
 
 **1. A state-file `skip` is invisible in the report.** Those two MUSTs rendered
 as plain `incomplete` — indistinguishable from requirements nobody examined. The
 `skip_reason` was only ever in `annotation-loop-progress.json`, which duvet does
-not read. Both are now annotated `//= type=TODO`, which keeps them uncited but
-labels them as known gaps (`incomplete` + `todo` in the report JSON).
+not read.
 
-`type=exception` was the alternative and was rejected: it carries a `reason=`
-string into the HTML report, but `report/ci.rs` marks exceptions as fully
-covered, so it would have moved the requirement *out* of the uncited pool. That
-declares the deviation accepted, which is a maintainer's call.
+They were first annotated `//= type=TODO` on the reasoning that `report/ci.rs`
+marks exceptions as fully covered, so `exception` declares the deviation
+accepted — a maintainer's call. That was reversed once the provenance evidence
+below was in hand, and the reversal was the right one: TODO carries **no** text
+into the report (`reason=` is rejected on TODO by `comment/parser.rs`), so
+choosing it meant the four pieces of evidence stayed in a `//` comment duvet
+ignores. `type=exception` + `reason=` puts the justification in the report
+verbatim, which is the whole point of recording it. Both are now:
+
+```c
+//= https://www.rfc-editor.org/rfc/rfc8439#section-4
+//= type=exception
+//= reason=Only an upper bound is enforced, so a caller may select a
+//= reason=truncated tag. Inherited and intentional rather than an aws-lc
+//= reason=divergence: ...
+```
+
+Multiple `//= reason=` lines are supported and joined with a single space.
+
+**The lesson is about ordering, not about which type is correct.** The type
+should be picked *after* the provenance check, not before — the evidence is what
+distinguishes an accepted deviation from an unresolved gap, and it is also the
+`reason=` text. Deciding first and investigating second produced the wrong
+annotation and hid the investigation.
 
 `check_duvet.py` was collapsing both `exception` and `todo` into UNCITED, hiding
 exactly the requirements a reviewer needs. Now reports four columns:
-CITED / TODO / EXCPT / UNCITED.
+CITED / TODO / EXCPT / UNCITED — rfc8439 reads 3 / 0 / 2 / 3.
 
 **2. Checking fork provenance answered the question without a co-worker.** The
 plan was to ask a teammate whether caller-selected `tag_len` is an accepted
@@ -266,7 +286,8 @@ deviation. Four commands made that unnecessary:
 So this is not an aws-lc divergence and not an oversight — it is a documented
 property of the `EVP_AEAD` abstraction, inherited unchanged. The RFC's own
 wording ("any protocol *using* this algorithm") addresses protocols, and aws-lc
-ships the primitive.
+ships the primitive. That is what justifies `type=exception`: an accepted,
+documented deviation, with the evidence attached.
 
 **Generalized into a rule** (see SKILL.md): before escalating an "API permits
 what the spec forbids" finding to a human, establish provenance. Documented

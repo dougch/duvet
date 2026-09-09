@@ -155,10 +155,12 @@ Seven, discovered in this order. Record one in `skip_reason`, and always say
    evidence and flag it. Often the requirement's actor is a protocol rather than
    the primitive, which is a legitimate defense.
 
-   **Annotate this category as `type=TODO`, not as a skip.** A skip is invisible
-   in the duvet report — the reason lives only in the state file, so the
-   requirement looks identical to one nobody examined. See "Recording a
-   non-citation in the report" below.
+   **Never record this category as a bare skip** — a skip is invisible in the
+   duvet report, so the requirement looks identical to one nobody examined.
+   Annotate it, and let the provenance check pick the type: `type=exception`
+   with a `reason=` when documented intent plus unchanged upstream history
+   establish the behavior is inherited and deliberate, `type=TODO` when it
+   looks like an unresolved gap. See "Recording a non-citation in the report".
 
 Categories 4-7 all came from RFCs outside the FIPS module, which is why the
 annotatable ratio fell from 67% to 41% once those were in scope.
@@ -180,10 +182,22 @@ against the JSON report:
 - `report/ci.rs` marks exceptions as **fully covered**, so `--require-citations`
   passes on them.
 
-**Default to `type=TODO`.** `exception` declares the deviation accepted and
-removes the requirement from the uncited pool — that is a maintainer's decision,
-not the loop's. Put the explanation in a plain `//` comment directly above the
-annotation block: duvet ignores it, but it is what a reviewer reads in the diff.
+**Which one to use is decided by evidence, not by default.**
+
+- `type=exception` + `reason=` when the behavior is **established as deliberate**
+  — documented intent in a public header plus unchanged upstream provenance (see
+  the fork-provenance check below). This is the only type that carries the
+  justification into the report, and the justification is the artifact a
+  reviewer actually needs. Multiple `//= reason=` lines are supported and are
+  joined with a single space, so keep whole words on each line.
+- `type=TODO` when it is a genuine unresolved gap. It keeps the requirement in
+  the uncited pool, but carries no text — so the explanation has to live in a
+  plain `//` comment that duvet ignores.
+
+Do not reach for `exception` to make a number go green: it removes the
+requirement from the uncited pool, so the `reason=` has to be strong enough that
+a maintainer reading it in the report would agree. If the evidence is only "this
+looks intentional," that is a TODO.
 
 ## Before escalating a finding to a human: check fork provenance
 
@@ -204,7 +218,10 @@ entirely: the check is unchanged from Adam Langley's 2014 commit `de0b20268`
 (which predates RFC 8439), current upstream BoringSSL has it verbatim, and
 `include/openssl/aead.h` documents truncation as intended for every AEAD.
 **Documented intent plus unchanged upstream provenance is a much stronger answer
-than a maintainer's recollection**, and it takes less of everyone's time.
+than a maintainer's recollection**, and it takes less of everyone's time. That
+evidence is also what decides the annotation type: it is what took those two
+requirements from `type=TODO` to `type=exception`, with the provenance itself as
+the `reason=`.
 
 ## Run Log
 
